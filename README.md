@@ -34,7 +34,8 @@ a **CLI** (`routerctl`), and any script speaking HTTP.
 curl -fsSL https://raw.githubusercontent.com/bwangbos/si-router-test-win-med/main/install.sh | sudo bash
 # or from a checkout:
 sudo bash install.sh                 # clone + build + systemd unit + CLI
-sudo bash install.sh --repo <url> --ref main --listen 0.0.0.0:8443
+sudo bash install.sh --listen 192.168.1.1:8443 --no-enable
+sudo bash install.sh --from . --no-deps   # prebuilt binaries, own packages
 sudo bash install.sh --uninstall --purge
 ```
 
@@ -143,5 +144,5 @@ representative sample configuration.)*
 - ✅ Control plane + reconcilers + REST API + CLI
 - ✅ Verified against a real Linux kernel (bridges, routes, nft, dnsmasq DHCP/DNS, WireGuard)
 - ✅ Web UI — dependency-free SPA served from the routerd binary (`/`, same REST API as the CLI)
-- ✅ Installer — `install.sh` verified live: install → systemd active → CLI/API → `--uninstall --purge` clean
+- ✅ Installer — `install.sh` verified live: install → systemd active → CLI/API → `--uninstall --purge` clean; dependency set resolve-verified on a Debian 13 (trixie) chroot
 - ⏭ Next: PPPoE supervision, per-interface throughput graphs (SSE), optional Wi-Fi management via external APs
