@@ -1,0 +1,18 @@
+# binaries & build output
+router/bin/
+*.exe
+*.exe~
+routerd-linux
+routerctl-linux
+
+# local scratch / runtime artifacts
+router/txn.json
+router/txn_cfg.json
+router/configs/seed.json
+*.log
+routerd-data/
+data/
+
+# OS
+.DS_Store
+Thumbs.db
