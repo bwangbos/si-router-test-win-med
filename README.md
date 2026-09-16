@@ -39,11 +39,15 @@ sudo bash install.sh --uninstall --purge
 ```
 
 Installs `routerd` (systemd service, state in `/var/lib/routerd`) and
-`routerctl` to `/usr/local/bin`; auto-installs `dnsmasq` on apt systems and
-disables the distro unit (routerd uses its own). No Go on the box? The
-script fetches the toolchain, or skip building entirely with `--from DIR`
-(prebuilt `routerd-linux` / `routerctl-linux`). The initial admin password
-is written to `/var/lib/routerd/initial-admin-password` (0600).
+`routerctl` to `/usr/local/bin`. On apt systems (Debian 13, Ubuntu, …) it
+also installs every runtime dependency — `iproute2`, `nftables`,
+`wireguard-tools`, `dnsmasq` — plus `git curl ca-certificates` when
+building, then disables the distro `dnsmasq`/`nftables` units (routerd
+owns the ruleset and drives dnsmasq through its own unit). Skip all of
+that with `--no-deps`. No Go on the box? The script fetches the toolchain,
+or skip building entirely with `--from DIR` (prebuilt `routerd-linux` /
+`routerctl-linux`). The initial admin password is written to
+`/var/lib/routerd/initial-admin-password` (0600).
 
 ## Quick start (development)
 

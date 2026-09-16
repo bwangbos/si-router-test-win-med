@@ -11,6 +11,7 @@
 #   --data-dir DIR    routerd state directory        (default: /var/lib/routerd)
 #   --listen ADDR     management API listen address  (default: 0.0.0.0:8443)
 #   --no-enable       install + start but do not enable at boot
+#   --no-deps         do not apt-get install runtime/build dependencies
 #   --uninstall       stop and remove service + binaries (state dir kept)
 #   --purge           with --uninstall, also remove the state directory
 set -euo pipefail
@@ -21,6 +22,7 @@ BIN_DIR=/usr/local/bin
 DATA_DIR=/var/lib/routerd
 LISTEN=0.0.0.0:8443
 ENABLE=1
+NODEPS=0
 FROM=""
 UNINSTALL=0
 PURGE=0
@@ -35,9 +37,10 @@ while [ $# -gt 0 ]; do
     --data-dir) DATA_DIR=$2; shift 2;;
     --listen) LISTEN=$2; shift 2;;
     --no-enable) ENABLE=0; shift;;
+    --no-deps) NODEPS=1; shift;;
     --uninstall) UNINSTALL=1; shift;;
     --purge) PURGE=1; shift;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0;;
+    -h|--help) awk 'NR>1 && /^#/{print} NR>1 && !/^#/{exit}' "$0"; exit 0;;
     *) echo "unknown option: $1" >&2; exit 2;;
   esac
 done
@@ -62,6 +65,20 @@ fi
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1" >&2; exit 1; }; }
 
+# Runtime deps: iproute2 (ip, tc), nftables (nft), wireguard-tools (wg),
+# dnsmasq (DHCP/DNS service). systemd is assumed (routerd runs as a unit).
+# The distro nftables.service stays disabled: its boot load would atomically
+# replace the ruleset and wipe routerd's table.
+DEPS_RUNTIME="iproute2 nftables wireguard-tools dnsmasq"
+DEPS_BUILD="git curl ca-certificates"
+if [ "$NODEPS" != 1 ] && ! command -v apt-get >/dev/null 2>&1; then
+  echo "apt-get not found — ensure these packages exist: $DEPS_RUNTIME $DEPS_BUILD" >&2
+fi
+apt_install() {
+  DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $*
+}
+
 SRC=""
 cleanup() { [ -n "$SRC" ] && [ -d "$SRC" ] && rm -rf "$SRC"; }
 trap cleanup EXIT
@@ -74,6 +91,9 @@ if [ -n "$FROM" ]; then
   install -m 0755 "$FROM/routerd-linux" "$BIN_DIR/routerd"
   install -m 0755 "$FROM/routerctl-linux" "$BIN_DIR/routerctl"
 else
+  if [ "$NODEPS" != 1 ] && command -v apt-get >/dev/null 2>&1; then
+    apt_install $DEPS_BUILD
+  fi
   need git
   SRC=$(mktemp -d)
   git clone --quiet --depth 1 --branch "$REF" "$REPO" "$SRC"
@@ -101,15 +121,14 @@ else
 fi
 
 mkdir -p "$DATA_DIR"
-if ! command -v dnsmasq >/dev/null 2>&1; then
-  echo "dnsmasq not found (required for the DHCP/DNS service)"
-  if command -v apt-get >/dev/null 2>&1; then
-    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq dnsmasq
-    systemctl disable --now dnsmasq 2>/dev/null || true  # routerd uses its own unit
-  else
-    echo "install dnsmasq manually, then restart routerd" >&2
-  fi
+if [ "$NODEPS" != 1 ] && command -v apt-get >/dev/null 2>&1; then
+  apt_install $DEPS_RUNTIME
+elif ! command -v dnsmasq >/dev/null 2>&1; then
+  echo "install dnsmasq manually, then restart routerd" >&2
+fi
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl disable --now dnsmasq 2>/dev/null || true  # routerd uses its own unit
+  systemctl disable --now nftables 2>/dev/null || true # keep routerd's ruleset intact
 fi
 cat > "$UNIT" <<EOF
 [Unit]
