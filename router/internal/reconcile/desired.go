@@ -50,8 +50,20 @@ type Desired struct {
 	TC          map[string][]string
 }
 
+// RuntimeInput injects transient runtime facts (currently DHCPv4 WAN
+// leases) into the desired state. Config remains the source of truth; the
+// registry merely answers "what did we just learn from the network".
+type RuntimeInput struct {
+	Routes    []DesiredRoute
+	Addrs     map[string][]string
+	Upstreams []string // dnsmasq upstream servers (lease DNS first)
+}
+
 // Build computes desired state from configuration.
-func Build(c models.Config) (*Desired, error) {
+func Build(c models.Config) (*Desired, error) { return BuildWith(c, nil) }
+
+// BuildWith computes desired state plus runtime input.
+func BuildWith(c models.Config, rt *RuntimeInput) (*Desired, error) {
 	errs := models.Validate(c)
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("invalid configuration: %s", models.ErrorList(errs))
@@ -147,6 +159,16 @@ func Build(c models.Config) (*Desired, error) {
 		return nil, err
 	}
 	d.NftScript = nft
+	if rt != nil {
+		d.Routes = append(d.Routes, rt.Routes...)
+		for dev, cidrs := range rt.Addrs {
+			d.Addrs[dev] = append(d.Addrs[dev], cidrs...)
+			d.DropAddrs[dev] = true
+		}
+		if len(rt.Upstreams) > 0 {
+			c.DNS.Upstreams = rt.Upstreams
+		}
+	}
 	dnsmasq, err := dhcp.GenerateDnsmasqConf(c)
 	if err != nil {
 		return nil, err

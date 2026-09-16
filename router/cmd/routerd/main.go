@@ -9,6 +9,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -18,9 +19,11 @@ import (
 
 	"router/internal/api"
 	"router/internal/config"
+	"router/internal/dhcp4"
 	"router/internal/platform"
 	"router/internal/reconcile"
 	"router/internal/store"
+	"router/pkg/models"
 )
 
 func main() {
@@ -35,6 +38,7 @@ func main() {
 		key        = flag.String("tls-key", "", "TLS private key")
 		plain      = flag.Bool("plain-http", false, "serve plain HTTP (development only)")
 		reconcileI = flag.Duration("reconcile-interval", 5*time.Minute, "periodic drift-repair interval (0 disables)")
+		simWAN     = flag.Bool("sim-wan-dhcp", true, "fake backend: simulate a DHCP server on the WAN (TEST-NET lease)")
 	)
 	flag.Parse()
 
@@ -60,16 +64,42 @@ func main() {
 		seedFrom(*dataDir, *bootstrap)
 	}
 
+	// WAN DHCP (design section 14): clients live in the daemon; leases land
+	// in the registry which feeds the reconciler as runtime input.
+	var (
+		reg *dhcp4.Registry
+		mgr *dhcp4.Manager
+	)
+	transport := dhcp4.TransportFactory(dhcp4.UDPTransportFactory)
+	if *backend == "fake" && *simWAN {
+		sim := &dhcp4.Sim{
+			IP: net.IPv4(203, 0, 113, 10), Mask: net.CIDRMask(24, 32),
+			GW: net.IPv4(203, 0, 113, 1), DNS: []string{"1.1.1.1", "9.9.9.9"},
+			Lease: time.Hour,
+		}
+		transport = sim.Factory()
+	}
+	reg = dhcp4.NewRegistry(nil)
 	srv, err := api.New(api.Options{
 		DataDir: *dataDir, Exec: ex, Src: src, AdminPassword: *adminPw,
+		WANLeases: reg,
+		WANSync: func(c models.Config) {
+			if mgr != nil {
+				mgr.Sync(c)
+			}
+		},
 	})
 	if err != nil {
 		log.Fatalf("routerd: %v", err)
 	}
+	reg.SetOnChange(func() { go srv.ReconcileNow() })
+	mgr = dhcp4.NewManager(dhcp4.Deps{Exec: ex, Reg: reg, Sync: func() { go srv.ReconcileNow() },
+		Make: transport, Event: srv.Event})
 
 	// Boot sequence (section 47): load config, inspect actual state, reconcile.
 	if c, _, err := srv.Committed(); err == nil {
-		if d, berr := reconcile.Build(c); berr == nil {
+		mgr.Sync(c)
+		if d, berr := reconcile.BuildWith(c, reg.Runtime(c)); berr == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			if _, aerr := srv.Engine().Apply(ctx, d); aerr != nil {
 				log.Printf("routerd: initial reconciliation: %v", aerr)
@@ -122,6 +152,7 @@ func main() {
 	case <-sig:
 		log.Printf("routerd: shutting down")
 		srv.Event("daemon.stop", "signal")
+		mgr.Shutdown() // send RELEASEs
 		close(stop)
 	}
 }

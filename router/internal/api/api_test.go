@@ -2,14 +2,18 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"router/internal/dhcp"
+	"router/internal/dhcp4"
 	"router/internal/platform"
 	"router/pkg/models"
 )
@@ -640,4 +644,89 @@ func TestEmptyCollectionsAreArrays(t *testing.T) {
 			t.Fatalf("%s: %d %s", p, code, body)
 		}
 	}
+}
+
+func TestWANDHCPRuntime(t *testing.T) {
+	f := platform.NewFake([]string{"eth0", "eth1"})
+	sim := &dhcp4.Sim{IP: net.IPv4(198, 18, 7, 50), Mask: net.CIDRMask(24, 32),
+		GW: net.IPv4(198, 18, 7, 1), DNS: []string{"198.18.0.1"}, Lease: time.Hour}
+	reg := dhcp4.NewRegistry(nil)
+	dir := t.TempDir()
+	var mgr *dhcp4.Manager
+	srv, err := New(Options{DataDir: dir, Exec: f, Src: f, AdminPassword: "testpw",
+		WANLeases: reg, WANSync: func(c models.Config) {
+			if mgr != nil {
+				mgr.Sync(c)
+			}
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetOnChange(func() { srv.ReconcileNow() })
+	mgr = dhcp4.NewManager(dhcp4.Deps{Exec: f, Reg: reg, Sync: func() { srv.ReconcileNow() },
+		Make: sim.Factory()})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	h := &harness{t: t, srv: ts, f: f}
+	code, body := h.do(http.MethodPost, "/api/v1/auth/login",
+		map[string]string{"username": "admin", "password": "testpw"}, "")
+	if code != 200 {
+		t.Fatalf("login %d", code)
+	}
+	h.token = decode(t, body)["token"].(string)
+
+	// WAN eth0 -> DHCP
+	c := srv.effectiveConfig()
+	c.WANs[0].Mode = models.WANModeDHCP
+	c.WANs[0].Static = nil
+	code, body = h.do(http.MethodPut, "/api/v1/config", c, h.token)
+	if code != 200 {
+		t.Fatalf("config put %d %s", code, body)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	var wan []map[string]any
+	for time.Now().Before(deadline) {
+		_, body = h.do("GET", "/api/v1/wan/status", nil, h.token)
+		json.Unmarshal(body, &wan)
+		if len(wan) > 0 && wan[0]["address"] == "198.18.7.50/24" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(wan) == 0 || wan[0]["address"] != "198.18.7.50/24" {
+		t.Fatalf("wan status has no lease address: %s", wan[0]["address"])
+	}
+	if wan[0]["gateway"] != "198.18.7.1" {
+		t.Fatalf("gateway=%v", wan[0]["gateway"])
+	}
+	// dnsmasq config gained the lease-provided upstream
+	conf, _ := f.File(dhcp.ConfPathFor())
+	if !strings.Contains(string(conf), "server=198.18.0.1") {
+		t.Fatalf("dnsmasq conf missing lease upstream:\n%s", conf)
+	}
+	// kernel (fake): address and default route applied
+	out, err := f.Run(context.Background(), nil, "ip", "-o", "-4", "addr", "show", "dev", "eth0")
+	if err == nil && !strings.Contains(string(out), "198.18.7.50") {
+		t.Fatalf("lease address not on link: %s", out)
+	}
+	// switch to static: client released, lease address removed
+	c = srv.effectiveConfig()
+	c.WANs[0].Mode = models.WANModeStatic
+	c.WANs[0].Static = &models.StaticWAN{Address: "203.0.113.5/24", Gateway: "203.0.113.1"}
+	code, body = h.do(http.MethodPut, "/api/v1/config", c, h.token)
+	if code != 200 {
+		t.Fatalf("static switch failed %d %s", code, body)
+	}
+	deadline2 := time.Now().Add(5 * time.Second)
+	for reg.Get("eth0") != nil && time.Now().Before(deadline2) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if reg.Get("eth0") != nil {
+		t.Fatal("lease not released on mode change")
+	}
+	out, _ = f.Run(context.Background(), nil, "ip", "-o", "-4", "addr", "show", "dev", "eth0")
+	if strings.Contains(string(out), "198.18.7.50") {
+		t.Fatalf("lease address still present after release: %s", out)
+	}
+	mgr.Shutdown()
 }

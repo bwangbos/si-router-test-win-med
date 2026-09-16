@@ -24,6 +24,34 @@
 - dnsmasq: driven via `--conf-file=` only (never the distro unit/conf-dir); dedicated unit `routerd-dnsmasq.service`; `except-interface=lo` (stub resolvers own :53 on lo); flags `--no-confdir` and `leasefile-ro=no` do not exist.
 - API JSON: list endpoints must return `[]`, never Go-nil `null`.
 
+## WAN DHCP (internal/dhcp4) invariants
+- The client NEVER touches the kernel. Leases go into `dhcp4.Registry`,
+  which the reconciler consumes via `RuntimeInput` (addrs, default route,
+  dnsmasq upstreams) in `BuildWith`. Keep this single-write-path property.
+- Magic cookie is RFC 2131's 99.130.83.69 (0x63 82 53 45). A self-consistent
+  codec typo on both encode+decode sides passes unit tests but every real
+  server silently ignores you. `TestMagicCookieRFC` pins the literal bytes.
+- `nft` input chain: `iifname @wan udp sport 67 dport 68 accept` must stay
+  BEFORE `ct state invalid drop`. A reply to a limited-broadcast request is
+  commonly INVALID to conntrack; the generic rule order dropped real OFFERs.
+- Engine applies one cycle at a time (`Engine.mu`) and materializes
+  interfaces, then addresses, re-observing between phases before planning
+  routes: the kernel rejects a via-gateway route whose on-link prefix is not
+  programmed yet ("Nexthop has invalid gateway"). Already-materialized ops
+  are NOT included in the returned list (double-apply → EEXIST).
+- Authoritative address replacement is del-then-add, and stale deletes are
+  IgnoreErrors (idempotent), like stale routes.
+- Registry/mgr nudge reconcile via `onChange` + `Deps.Sync`; both fire on
+  bound — engine serialization is what makes that safe.
+
+## Virtualized-kernel test quirk (verification only)
+Some virtualized Linux kernels drop cross-netns broadcast UDP in both
+directions (even through a bridge) and do not loop self-sent limited
+broadcasts. DHCP interop testing on such kernels requires a netns peer plus
+a test server that UNICASTS its replies; the client state machine is
+unaffected. Do not "fix" the client for this, and do not conclude DHCP is
+broken when tcpdump shows the DISCOVER leaving but no OFFER arrives.
+
 ## Lockout safety invariants
 
 Generated config may never: put DHCP/DNS on WAN, hijack the WAN default route (router routes carry `metric 1000`), or destroy a WAN address. Deleting a network must also clean bridge, dnsmasq pool, nft sets.

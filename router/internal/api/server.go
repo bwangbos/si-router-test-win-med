@@ -29,6 +29,7 @@ import (
 	"router/internal/auth"
 	"router/internal/config"
 	"router/internal/dhcp"
+	"router/internal/dhcp4"
 	"router/internal/monitor"
 	"router/internal/platform"
 	"router/internal/reconcile"
@@ -49,6 +50,11 @@ type Options struct {
 	Src           any // optional LeaseSource/WANStatusProvider
 	AdminPassword string
 	Version       string
+	// WANLeases feeds DHCPv4 runtime state (addresses, routes, DNS) into
+	// the reconciler and WAN status; WANSync starts/stops clients for the
+	// effective configuration (nil disables WAN DHCP entirely).
+	WANLeases *dhcp4.Registry
+	WANSync   func(models.Config)
 }
 
 // Server is the routerd management API server.
@@ -105,12 +111,44 @@ func New(o Options) (*Server, error) {
 		opt: o, st: st, auth: am,
 		engine: reconcile.NewEngine(o.Exec, reconcile.NewFileProvenance(o.Exec,
 			filepath.Join(o.DataDir, "routes.mgmt.json"))),
-		monitor: monitor.New(o.Exec, o.Src),
+		monitor: monitor.New(o.Exec, o.wrapSrc()),
 		txns:    map[string]*transaction{},
 		start:   time.Now(),
 	}
 	s.syncAliases()
+	s.syncWans(s.effectiveConfig())
 	return s, nil
+}
+
+// wrapSrc chains the WAN lease registry in front of the configured status
+// source: lease-derived fields win, the backend fills the rest.
+func (o Options) wrapSrc() any {
+	if o.WANLeases == nil {
+		return o.Src
+	}
+	return &wanSrc{reg: o.WANLeases, base: o.Src}
+}
+
+type wanSrc struct {
+	reg  *dhcp4.Registry
+	base any
+}
+
+func (w *wanSrc) WANStatus(iface string) state.WANStatus {
+	if st := w.reg.WANStatus(iface); st.Address != "" {
+		return st
+	}
+	if p, ok := w.base.(monitor.WANStatusProvider); ok {
+		return p.WANStatus(iface)
+	}
+	return state.WANStatus{}
+}
+
+func (w *wanSrc) Leases() []state.Lease {
+	if ls, ok := w.base.(monitor.LeaseSource); ok {
+		return ls.Leases()
+	}
+	return nil
 }
 
 // NewTestEnv builds a server over a simulated platform for tests.
@@ -569,7 +607,7 @@ func (s *Server) applyNewConfig(w http.ResponseWriter, r *http.Request, next mod
 	}
 	s.mu.Unlock()
 
-	desired, err := reconcile.Build(next)
+	desired, err := s.buildDesired(next)
 	if err != nil {
 		writeJSON(w, 400, map[string]any{"error": err.Error()})
 		return
@@ -577,11 +615,12 @@ func (s *Server) applyNewConfig(w http.ResponseWriter, r *http.Request, next mod
 	ctx := r.Context()
 	if _, err := s.engine.Apply(ctx, desired); err != nil {
 		// roll the live system back to the previously effective state
-		if bd, berr := reconcile.Build(base); berr == nil {
+		if bd, berr := s.buildDesired(base); berr == nil {
 			s.engine.Apply(context.Background(), bd) //nolint:errcheck // best-effort recovery
 		}
 		s.audit(r, "config.apply", o.object, "error")
 		s.event("config.apply_failed", err.Error())
+		s.syncWans(base)
 		writeErr(w, 500, "apply failed: "+err.Error())
 		return
 	}
@@ -597,6 +636,7 @@ func (s *Server) applyNewConfig(w http.ResponseWriter, r *http.Request, next mod
 		s.mu.Unlock()
 		s.audit(r, "config.apply_pending", o.object, "ok")
 		s.event("config.pending", o.message)
+		s.syncWans(next)
 		writeJSON(w, 202, map[string]any{"status": "pending",
 			"pending": map[string]any{"commit_token": token,
 				"expires": time.Now().Add(o.confirm)},
@@ -617,6 +657,7 @@ func (s *Server) applyNewConfig(w http.ResponseWriter, r *http.Request, next mod
 	s.mu.Unlock()
 	s.audit(r, "config.apply", o.object, "ok")
 	s.event("config.applied", o.message)
+	s.syncWans(next)
 	code := 200
 	if o.created {
 		code = 201
@@ -639,9 +680,10 @@ func (s *Server) autoRollback() {
 	if p == nil {
 		return
 	}
-	if d, err := reconcile.Build(s.committedConfig()); err == nil {
+	if d, err := s.buildDesired(s.committedConfig()); err == nil {
 		s.engine.Apply(context.Background(), d) //nolint:errcheck
 	}
+	s.syncWans(s.committedConfig())
 	s.st.Audit(store.AuditEntry{User: "system", Action: "config.auto_rollback",
 		Object: p.txnID, Result: "ok"})
 	s.st.Event(store.Event{Kind: "config.auto_rollback", Detail: "commit window expired"})
@@ -671,6 +713,7 @@ func (s *Server) commitPending(w http.ResponseWriter, r *http.Request, token str
 	}
 	s.audit(r, "config.commit", p.txnID, "ok")
 	s.event("config.committed", "")
+	s.syncWans(p.cfg)
 	writeJSON(w, 200, map[string]any{"status": "committed"})
 }
 
@@ -682,7 +725,7 @@ func (s *Server) rollbackPending(w http.ResponseWriter, r *http.Request) {
 	if p != nil && p.timer != nil {
 		p.timer.Stop()
 	}
-	d, err := reconcile.Build(s.committedConfig())
+	d, err := s.buildDesired(s.committedConfig())
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -693,6 +736,7 @@ func (s *Server) rollbackPending(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "config.rollback", p.txnID, "ok")
 	s.event("config.rolled_back", "")
+	s.syncWans(s.committedConfig())
 	writeJSON(w, 200, map[string]any{"status": "rolled_back"})
 }
 
@@ -1347,11 +1391,27 @@ func (s *Server) ListenAndServeHTTP(addr string) error {
 	return srv.ListenAndServe()
 }
 
+// buildDesired computes desired state including WAN DHCP runtime input.
+func (s *Server) buildDesired(cfg models.Config) (*reconcile.Desired, error) {
+	var rt *reconcile.RuntimeInput
+	if s.opt.WANLeases != nil {
+		rt = s.opt.WANLeases.Runtime(cfg)
+	}
+	return reconcile.BuildWith(cfg, rt)
+}
+
+// syncWans (re)starts or releases DHCP clients per configuration.
+func (s *Server) syncWans(cfg models.Config) {
+	if s.opt.WANSync != nil {
+		s.opt.WANSync(cfg)
+	}
+}
+
 // ReconcileNow re-converges the live system toward the effective config
 // (used by the periodic drift-repair loop).
 func (s *Server) ReconcileNow() {
 	c := s.effectiveConfig()
-	d, err := reconcile.Build(c)
+	d, err := s.buildDesired(c)
 	if err != nil {
 		return
 	}

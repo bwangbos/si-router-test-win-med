@@ -131,13 +131,18 @@ representative sample configuration.)*
 
 ## Verification
 
-- 15 Go test packages green (unit + in-process REST API against the fake
-  data plane), `go vet` clean.
+- 16 Go test packages green (unit + in-process REST API against the fake
+  data plane, incl. the WAN DHCP client), `go vet` and `-race` clean.
 - End-to-end on a real Linux kernel (disposable VM, root): bridge/VLAN creation and
   enslavement, default-route metric, nft rules live in the kernel, DNS
   answered on LAN gateways, **full DHCP DORA handshakes** from a netns
   `udhcpc` client, lease + device inventory, daemon-restart reconstruction,
   confirmed commits, auto-rollback, and transaction lifecycle.
+- WAN DHCPv4 client verified end-to-end against an **independent third-party
+  DHCP server** (netns peer): DORA handshake, lease address + default route
+  applied to the kernel, lease DNS injected into dnsmasq upstreams, release
+  on mode change. A codec/conntrack/ordering bug was found this way that
+  self-consistent unit tests could not catch.
 
 ## Status
 
@@ -145,4 +150,5 @@ representative sample configuration.)*
 - ✅ Verified against a real Linux kernel (bridges, routes, nft, dnsmasq DHCP/DNS, WireGuard)
 - ✅ Web UI — dependency-free SPA served from the routerd binary (`/`, same REST API as the CLI)
 - ✅ Installer — `install.sh` verified live: install → systemd active → CLI/API → `--uninstall --purge` clean; dependency set resolve-verified on a Debian 13 (trixie) chroot
+- ✅ WAN DHCPv4 client (native, in-daemon; leases feed the reconciler as runtime input)
 - ⏭ Next: PPPoE supervision, per-interface throughput graphs (SSE), optional Wi-Fi management via external APs

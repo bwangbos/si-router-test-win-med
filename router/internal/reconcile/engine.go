@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"router/internal/dhcp"
 	"router/internal/platform"
@@ -99,6 +100,17 @@ func cmd(ops []Operation, rec, desc string, argvs ...[]string) []Operation {
 	var cs []Command
 	for _, a := range argvs {
 		cs = append(cs, Command{Argv: a})
+	}
+	return append(ops, Operation{Reconciler: rec, Desc: desc, Commands: cs})
+}
+
+// cmdIdempotent records commands whose failure is tolerated (removal of
+// state that may already be gone — concurrent flushes, kernel side effects
+// that cascade, or a crash between plan and apply).
+func cmdIdempotent(ops []Operation, rec, desc string, argvs ...[]string) []Operation {
+	var cs []Command
+	for _, a := range argvs {
+		cs = append(cs, Command{Argv: a, IgnoreErrors: true})
 	}
 	return append(ops, Operation{Reconciler: rec, Desc: desc, Commands: cs})
 }
@@ -205,18 +217,22 @@ func PlanAddrs(d *Desired, a *Actual) []Operation {
 			continue // link will be created in a later pass
 		}
 		have := a.Addrs.By(dev).Addrs
+		// Stale addresses are removed BEFORE new ones are added: an
+		// authoritative (DropAddrs) replacement must not leave a window
+		// where removal of the primary address can disturb freshly
+		// programmed secondaries (observed on real kernels).
+		if d.DropAddrs[dev] {
+			for _, h := range have {
+				if !strHas(want, h) && !strings.HasPrefix(h, "fe80:") {
+					ops = cmdIdempotent(ops, "address", "del "+h+" dev "+dev,
+						[]string{"ip", "addr", "del", h, "dev", dev})
+				}
+			}
+		}
 		for _, w := range want {
 			if !strHas(have, w) {
 				ops = cmd(ops, "address", "add "+w+" dev "+dev,
 					[]string{"ip", "addr", "add", w, "dev", dev})
-			}
-		}
-		if d.DropAddrs[dev] {
-			for _, h := range have {
-				if !strHas(want, h) && !strings.HasPrefix(h, "fe80:") {
-					ops = cmd(ops, "address", "del "+h+" dev "+dev,
-						[]string{"ip", "addr", "del", h, "dev", dev})
-				}
 			}
 		}
 	}
@@ -449,6 +465,11 @@ type Report struct {
 type Engine struct {
 	ex   platform.Executor
 	prov RouteProvenance
+	// mu serializes whole apply cycles: reconcile nudges can fire from
+	// several sources at the same instant (lease bound, config applied,
+	// drift timer), and unsynchronized passes observe stale state and
+	// collide on idempotent-but-not-concurrent kernel operations.
+	mu sync.Mutex
 }
 
 // NewEngine creates a reconciliation engine over the given executor and
@@ -460,8 +481,15 @@ func NewEngine(ex platform.Executor, prov RouteProvenance) *Engine {
 	return &Engine{ex: ex, prov: prov}
 }
 
-// PlanAll computes the full ordered operation set.
+// PlanAll computes the full ordered operation set and materializes the
+// additive phases (interfaces, addresses). It serializes with Apply.
 func (e *Engine) PlanAll(ctx context.Context, d *Desired) (*Actual, []Operation, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.planAll(ctx, d)
+}
+
+func (e *Engine) planAll(ctx context.Context, d *Desired) (*Actual, []Operation, error) {
 	a, err := Observe(ctx, e.ex)
 	if err != nil {
 		return nil, nil, err
@@ -480,7 +508,21 @@ func (e *Engine) PlanAll(ctx context.Context, d *Desired) (*Actual, []Operation,
 		}
 	}
 	var ops []Operation
-	ops = append(ops, PlanAddrs(d, a)...)
+	// Materialize addresses before planning routes: a gateway is only
+	// valid once its on-link prefix exists, and observation must refresh
+	// first so route planning sees the programmed addresses (mirrors the
+	// links phase above).
+	if addrOps := PlanAddrs(d, a); len(addrOps) > 0 {
+		if err := ApplyOps(ctx, e.ex, addrOps); err != nil {
+			return a, addrOps, err
+		}
+		// addrOps are already materialized above (mirrors links); they are
+		// deliberately NOT returned, or Apply would execute them twice and
+		// the idempotent add would fail with EEXIST mid-batch.
+		if a, err = Observe(ctx, e.ex); err != nil {
+			return a, ops, err
+		}
+	}
 	ops = append(ops, PlanRoutes(d, a, e.prov.Load())...)
 	ops = append(ops, PlanFirewall(d, a.NftScript)...)
 	ops = append(ops, PlanServices(d, e.ex)...)
@@ -499,8 +541,11 @@ func prefixDev(qs []state.Qdisc, dev string) []state.Qdisc {
 // (addresses/routes/services) see the newly created devices in the same pass.
 
 // Apply plans and executes all operations, then verifies convergence.
+// Only one apply cycle runs at a time per engine.
 func (e *Engine) Apply(ctx context.Context, d *Desired) (*Report, error) {
-	_, ops, err := e.PlanAll(ctx, d)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, ops, err := e.planAll(ctx, d)
 	if err != nil {
 		return nil, err
 	}

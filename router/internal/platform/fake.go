@@ -29,6 +29,7 @@ type Executor interface {
 type flink struct {
 	name   string
 	typ    string
+	mac    string
 	master string
 	parent string
 	vlanID int
@@ -74,7 +75,7 @@ func NewFake(ethIfaces []string) *Fake {
 		wan: map[string]*state.WANStatus{}, idx: 1, failOn: map[string]string{}, failN: map[string]int{}}
 	add := func(name, typ string, mtu int) {
 		f.idx++
-		f.links = append(f.links, &flink{name: name, typ: typ, mtu: mtu})
+		f.links = append(f.links, &flink{name: name, typ: typ, mtu: mtu, mac: fakeMAC(name)})
 	}
 	add("lo", "loopback", 65536)
 	for _, e := range ethIfaces {
@@ -180,7 +181,7 @@ func (f *Fake) ipLink(args []string) ([]byte, error) {
 		if f.find(name) != nil {
 			return nil, fmt.Errorf("ip link add: %s exists", name)
 		}
-		l := &flink{name: name, typ: typ, mtu: 1500}
+		l := &flink{name: name, typ: typ, mtu: 1500, mac: fakeMAC(name)}
 		switch typ {
 		case "bridge", "wireguard":
 		case "vlan":
@@ -224,7 +225,8 @@ func (f *Fake) ipLink(args []string) ([]byte, error) {
 			case "nomaster":
 				l.master = ""
 			case "address":
-				// MAC override accepted, not modeled further
+				l.mac = argAt(args, i+1)
+				i++
 			}
 		}
 		return nil, nil
@@ -259,6 +261,7 @@ func (f *Fake) ipLink(args []string) ([]byte, error) {
 type rawLinkJSON struct {
 	Ifindex  int      `json:"ifindex"`
 	IFname   string   `json:"ifname"`
+	Address  string   `json:"address,omitempty"`
 	Flags    []string `json:"flags"`
 	MTU      int      `json:"mtu"`
 	LinkType string   `json:"link_type"`
@@ -290,7 +293,7 @@ func (f *Fake) rawLink(l *flink) rawLinkJSON {
 	if l.up {
 		flags = append(flags, "UP", "LOWER_UP")
 	}
-	r := rawLinkJSON{Ifindex: f.idx, IFname: l.name, Flags: flags, MTU: l.mtu,
+	r := rawLinkJSON{Ifindex: f.idx, IFname: l.name, Address: l.mac, Flags: flags, MTU: l.mtu,
 		LinkType: l.typ, Master: l.master, Link: l.parent}
 	if l.vlanID != 0 {
 		r.VLAN = &struct {
@@ -916,4 +919,32 @@ func removeQ(qs []fq, pred func(fq) bool) []fq {
 		}
 	}
 	return out
+}
+
+// fakeMAC derives a deterministic locally-administered MAC from a name.
+func fakeMAC(name string) string {
+	var h uint32 = 2166136261
+	for i := 0; i < len(name); i++ {
+		h = (h ^ uint32(name[i])) * 16777619
+	}
+	return fmt.Sprintf("52:54:%02x:%02x:%02x:%02x", byte(h>>24), byte(h>>16), byte(h>>8), byte(h))
+}
+
+// SetLinkMAC overrides a link's MAC address (simulation hook for tests).
+func (f *Fake) SetLinkMAC(name, mac string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if l := f.find(name); l != nil {
+		l.mac = mac
+	}
+}
+
+// LinkMAC returns a link's MAC (simulation hook for tests).
+func (f *Fake) LinkMAC(name string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if l := f.find(name); l != nil {
+		return l.mac
+	}
+	return ""
 }

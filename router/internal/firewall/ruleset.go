@@ -101,9 +101,12 @@ func Generate(c models.Config) (string, error) {
 	g.line(1, "chain input { comment \"__ROUTERD_SHA__\"")
 	g.line(2, "type filter hook input priority 0; policy drop;")
 	g.line(2, `iifname "lo" accept`)
+	// DHCP replies are accepted BEFORE ct-invalid-drop: a request sent to
+	// the limited broadcast address is often not conntracked, so the server
+	// reply would otherwise be classified INVALID and silently dropped.
+	g.line(2, `iifname @wan_ifaces udp sport 67 udp dport 68 accept`)
 	g.line(2, "ct state established,related accept")
 	g.line(2, "ct state invalid drop")
-	g.line(2, `iifname @wan_ifaces udp sport 67 udp dport 68 accept`)
 	g.line(2, `iifname @wan_ifaces ip6 nexthdr 58 accept`)
 	for _, t := range c.WireGuard {
 		port := t.ListenPort
