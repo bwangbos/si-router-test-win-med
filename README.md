@@ -25,11 +25,14 @@ a **CLI** (`routerctl`), and any script speaking HTTP.
 | `router/internal/store` | Revisioned config persistence + audit log + event bus |
 | `router/internal/monitor` | WAN status, device inventory (leases + ARP/NDP + aliases), health checks |
 | `router/pkg/models` | Configuration model + validation |
+| `install.sh` | Linux installer: systemd unit for `routerd`, `routerctl` into `/usr/local/bin`, dnsmasq dependency, uninstall/purge |
 | `Go-Based Consumer-Prosumer Router Platform — System Design.md` | Original system design document |
 
 ## Install (Linux router)
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/bwangbos/si-router-test-win-med/main/install.sh | sudo bash
+# or from a checkout:
 sudo bash install.sh                 # clone + build + systemd unit + CLI
 sudo bash install.sh --repo <url> --ref main --listen 0.0.0.0:8443
 sudo bash install.sh --uninstall --purge
@@ -49,20 +52,21 @@ cd router
 go build ./... && go test ./...
 
 # simulated data plane (no root needed) — UI at http://127.0.0.1:8080
-go run ./cmd/routerd --backend fake --ifaces eth0,eth1,eth2 --plain-http --listen 127.0.0.1:8080
+go run ./cmd/routerd --backend fake --ifaces eth0,eth1,eth2 --plain-http --listen 127.0.0.1:8080 --data-dir ./tmp-routerd
 
 # real Linux data plane (root) — UI at https://<router>:8443 (self-signed on first run)
 sudo ./routerd --backend linux --data-dir /var/lib/routerd --listen 0.0.0.0:8443
 
-# CLI
-go run ./cmd/routerctl --server https://127.0.0.1:8443 --insecure login
+# CLI (against the plain-HTTP fake daemon above)
+go run ./cmd/routerctl --server http://127.0.0.1:8080 login --password "$(cat <data-dir>/initial-admin-password)"
 go run ./cmd/routerctl networks add --name guest --subnet 10.10.0.1/24 \
     --zone GUEST --member lan1 --dhcp --start 10.10.0.100 --end 10.10.0.200
 ```
 
-The admin password is generated on first start (printed to the log) unless
-`--admin-password` is given; change it from **System → Change password** or
-`POST /api/v1/auth/password`.
+On first start an admin account is created: the password comes from
+`--admin-password`, or is randomly generated and written to
+`<data-dir>/initial-admin-password` (0600 — delete it after first login).
+Change it from **System → Change password** or `POST /api/v1/auth/password`.
 
 ## Web UI
 
@@ -135,4 +139,5 @@ representative sample configuration.)*
 - ✅ Control plane + reconcilers + REST API + CLI
 - ✅ Verified against a real Linux kernel (bridges, routes, nft, dnsmasq DHCP/DNS, WireGuard)
 - ✅ Web UI — dependency-free SPA served from the routerd binary (`/`, same REST API as the CLI)
+- ✅ Installer — `install.sh` verified live: install → systemd active → CLI/API → `--uninstall --purge` clean
 - ⏭ Next: PPPoE supervision, per-interface throughput graphs (SSE), optional Wi-Fi management via external APs
