@@ -85,10 +85,10 @@ func (l *Linux) File(path string) ([]byte, bool) {
 func (l *Linux) Leases() []state.Lease {
 	b, err := os.ReadFile(l.leaseFile)
 	if err != nil {
-		return nil
+		return []state.Lease{}
 	}
 	now := time.Now()
-	var out []state.Lease
+	out := []state.Lease{}
 	for _, le := range state.ParseLeases(b) {
 		if le.Expiry.After(now) {
 			out = append(out, le)

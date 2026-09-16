@@ -8,6 +8,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const fmtBytes = n => { n = Number(n) || 0; const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return (i ? n.toFixed(1) : n) + " " + u[i]; };
 const fmtDur = sec => { sec = Number(sec) || 0; const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60); return (d ? d + "d " : "") + h + "h " + m + "m"; };
 const ago = t => { const s = (Date.now() - Date.parse(t)) / 1000; if (s < 90) return Math.round(s) + "s ago"; if (s < 5400) return Math.round(s / 60) + "m ago"; if (s < 172800) return Math.round(s / 3600) + "h ago"; return new Date(t).toLocaleDateString(); };
+const arr = x => Array.isArray(x) ? x : [];
 const pill = (txt, cls) => `<span class="pill ${cls || "dim"}">${esc(txt)}</span>`;
 const pcls = s => { s = String(s).toLowerCase(); return /^(ok|healthy|up|active|enabled|committed)$/.test(s) ? "ok" : /^(warn|degraded|pending|drifted)$/.test(s) ? "warn" : /^(err|error|critical|unhealthy|down|fail|expired)$/.test(s) ? "err" : "dim"; };
 const yn = b => b ? pill("yes", "ok") : pill("no");
@@ -82,37 +83,37 @@ async function viewDashboard(v) {
   const [wan, ifaces, svcs, dhcp, evs, health] = await Promise.all([
     api("GET", "/wan/status"), api("GET", "/interfaces"), api("GET", "/services"),
     api("GET", "/config/dhcp"), api("GET", "/events?limit=8"), api("GET", "/health")]);
-  const wanInner = (wan || []).length ? wan.map(w => `<div class=row>${w.up ? pill("up", "ok") : pill("down", "err")}
+  const wanInner = arr(wan).length ? wan.map(w => `<div class=row>${w.up ? pill("up", "ok") : pill("down", "err")}
       <b>${esc(w.interface)}</b> <span class=mono>${esc(w.address || "no address")}</span>
       <span class="muted small">gw ${esc(w.gateway || "—")} · rx ${fmtBytes(w.stats?.rx_bytes)} tx ${fmtBytes(w.stats?.tx_bytes)}</span></div>`).join("") : "<span class=muted>no WAN defined</span>";
   v.innerHTML = `<h1>Dashboard</h1>
   <div class=cards>
     ${card("Internet", wanInner)}
-    ${card("Health", kv((health.checks || []).map(c => [c.name, pill(c.status, pcls(c.status)) + ` <span class="muted small">${esc(c.detail || "")}</span>`])))}
+    ${card("Health", kv(arr(health.checks).map(c => [c.name, pill(c.status, pcls(c.status)) + ` <span class="muted small">${esc(c.detail || "")}</span>`])))}
     ${card("DHCP server", kv([["service", pill(dhcp.service || "n/a", pcls(dhcp.service))], ["leases", dhcp.active_leases ?? "—"], ["config", dhcp.in_sync ? pill("in sync", "ok") : pill("drifted", "warn")], ["conf", `<span class="mono small">${esc(dhcp.conf_path || "—")}</span>`]]))}
-    ${card("Services", (svcs || []).map(s => `<div class=row>${pill(s.status, pcls(s.status))} <b>${esc(s.name)}</b> <span class="muted small">${esc(s.detail || "")}</span></div>`).join("") || "<span class=muted>none</span>")}
+    ${card("Services", arr(svcs).map(s => `<div class=row>${pill(s.status, pcls(s.status))} <b>${esc(s.name)}</b> <span class="muted small">${esc(s.detail || "")}</span></div>`).join("") || "<span class=muted>none</span>")}
   </div>
   <h2>Interfaces</h2>
   <table><tr><th>Name</th><th>Type</th><th>State</th><th>MTU</th><th>Master</th><th>Addresses</th><th>Network</th><th>Rx / Tx</th></tr>
-  ${(ifaces || []).map(i => `<tr><td class=mono><b>${esc(i.name)}</b></td><td>${esc(i.type)}</td>
+  ${arr(ifaces).map(i => `<tr><td class=mono><b>${esc(i.name)}</b></td><td>${esc(i.type)}</td>
     <td>${i.up ? pill("up", "ok") : pill("down")}</td><td>${i.mtu || ""}</td>
-    <td class=mono>${esc(i.master || "")}</td><td class=mono>${(i.addrs || []).map(esc).join("<br>")}</td>
+    <td class=mono>${esc(i.master || "")}</td><td class=mono>${arr(i.addrs).map(esc).join("<br>")}</td>
     <td>${i.network ? pill(i.network, "ok") : ""}</td><td class="muted small mono">${fmtBytes(i.stats?.rx_bytes)} / ${fmtBytes(i.stats?.tx_bytes)}</td></tr>`).join("")}
   </table>
   <h2>Recent events</h2>
-  <table>${[...(evs || [])].reverse().map(e => `<tr><td class="muted small" style=width:90px>${ago(e.time)}</td><td class=mono>${esc(e.kind)}</td><td class=muted>${esc(e.detail || "")}</td></tr>`).join("") || "<tr><td class=muted>no events yet</td></tr>"}</table>`;
+  <table>${arr(evs).slice().reverse().reverse().map(e => `<tr><td class="muted small" style=width:90px>${ago(e.time)}</td><td class=mono>${esc(e.kind)}</td><td class=muted>${esc(e.detail || "")}</td></tr>`).join("") || "<tr><td class=muted>no events yet</td></tr>"}</table>`;
 }
 
 async function viewInternet(v) {
   const wan = await api("GET", "/wan/status");
-  const st = Object.fromEntries((wan || []).map(w => [w.interface, w]));
-  v.innerHTML = `<h1>Internet</h1>` + (S.cfg.wans || []).map((w, i) => {
+  const st = Object.fromEntries(arr(wan).map(w => [w.interface, w]));
+  v.innerHTML = `<h1>Internet</h1>` + arr(S.cfg.wans).map((w, i) => {
     const s = st[w.interface] || {};
     return `<div class=card><h3>${esc(w.name || w.id)} — ${esc(w.interface)}</h3>
     <div class=row>
       ${s.up ? pill("link up", "ok") : pill("link down", "err")} ${w.enabled === false ? pill("disabled", "warn") : ""}
       <span class=mono>${esc(s.address || "no address")}</span>
-      <span class="muted small">mode ${esc(w.mode)} · metric ${w.metric ?? 0} · gw ${esc(s.gateway || "—")} · dns ${(s.dns || []).map(esc).join(", ") || "—"} · rx ${fmtBytes(s.stats?.rx_bytes)} tx ${fmtBytes(s.stats?.tx_bytes)}</span>
+      <span class="muted small">mode ${esc(w.mode)} · metric ${w.metric ?? 0} · gw ${esc(s.gateway || "—")} · dns ${arr(s.dns).map(esc).join(", ") || "—"} · rx ${fmtBytes(s.stats?.rx_bytes)} tx ${fmtBytes(s.stats?.tx_bytes)}</span>
       <span class=spacer></span>
       ${mayWrite() ? `<button class="mini" data-act="wan-edit" data-i="${i}">edit</button>` : ""}
     </div>
@@ -135,7 +136,7 @@ async function viewNetworks(v) {
   <table><tr><th>Name</th><th>Interface</th><th>Subnet</th><th>VLAN</th><th>Members</th><th>DHCP</th><th>Zone</th><th>Internet</th><th>LAN access</th><th></th></tr>
   ${nets.map((n, i) => `<tr><td><b>${esc(n.name)}</b></td><td class=mono>${esc(n.interface)}</td>
     <td class=mono>${esc(n.subnet)}</td><td>${n.vlan ? esc(n.vlan.parent) + "." + n.vlan.id : ""}</td>
-    <td class="mono small">${(n.members || []).map(esc).join(", ")}</td>
+    <td class="mono small">${arr(n.members).map(esc).join(", ")}</td>
     <td>${n.dhcp?.enabled ? pill("pool " + (n.dhcp.start || "") + "–" + (n.dhcp.end || ""), "ok") : pill("off")}</td>
     <td>${pill(esc(n.zone))}</td><td>${yn(n.internet_access !== false)}</td><td>${yn(n.access_to_lan)}</td>
     <td class=row>${mayWrite() ? `<button class="mini" data-act="net-edit" data-i="${i}">edit</button>
@@ -192,14 +193,14 @@ async function viewDevices(v) {
   const [devs, leases] = await Promise.all([api("GET", "/devices"), api("GET", "/leases")]);
   v.innerHTML = `<h1>Devices</h1>
   <table><tr><th>Name</th><th>IPv4</th><th>MAC</th><th>Hostname</th><th>Network</th><th>Source</th><th>Seen</th><th></th></tr>
-  ${(devs || []).map(d => `<tr><td><b>${esc(d.friendly_name || d.hostname || "")}</b></td>
+  ${arr(devs).map(d => `<tr><td><b>${esc(d.friendly_name || d.hostname || "")}</b></td>
     <td class=mono>${esc(d.ipv4 || "")}</td><td class="mono small">${esc(d.mac)}</td><td>${esc(d.hostname || "")}</td>
     <td>${esc(d.network || "")}</td><td>${pill(esc(d.source))}</td><td class="muted small">${ago(d.last_seen)}</td>
     <td>${mayWrite() ? `<button class="mini" data-act="dev-rename" data-mac="${esc(d.mac)}" data-cur="${esc(d.friendly_name || "")}">rename</button>` : ""}</td></tr>`).join("") || "<tr><td colspan=8 class=muted>no devices observed yet</td></tr>"}
   </table>
   <h2>DHCP leases</h2>
   <table><tr><th>IP</th><th>MAC</th><th>Hostname</th><th>Expires</th></tr>
-  ${(leases || []).map(l => `<tr><td class=mono>${esc(l.ip)}</td><td class="mono small">${esc(l.mac)}</td><td>${esc(l.hostname || "")}</td><td class="muted small">${new Date(l.expiry).toLocaleString()}</td></tr>`).join("") || "<tr><td colspan=4 class=muted>no active leases</td></tr>"}</table>`;
+  ${arr(leases).map(l => `<tr><td class=mono>${esc(l.ip)}</td><td class="mono small">${esc(l.mac)}</td><td>${esc(l.hostname || "")}</td><td class="muted small">${new Date(l.expiry).toLocaleString()}</td></tr>`).join("") || "<tr><td colspan=4 class=muted>no active leases</td></tr>"}</table>`;
 }
 
 async function viewFirewall(v) {
@@ -208,7 +209,7 @@ async function viewFirewall(v) {
   <table><tr><th></th><th>Name</th><th>Src → Dst</th><th>Proto</th><th>Ports</th><th>Action</th><th></th></tr>
   ${rules.map((r, i) => `<tr><td>${r.enabled ? pill("on", "ok") : pill("off")}</td><td><b>${esc(r.name || r.id)}</b></td>
     <td class=mono>${esc(r.source_zone)} → ${esc(r.dest_zone)}</td><td>${esc(r.protocol)}</td>
-    <td class=mono>${(r.ports || []).map(p => p.start === p.end ? p.start : p.start + "-" + p.end).join(", ")}</td>
+    <td class=mono>${arr(r.ports).map(p => p.start === p.end ? p.start : p.start + "-" + p.end).join(", ")}</td>
     <td>${pill(esc(r.action), r.action === "accept" ? "ok" : r.action === "drop" ? "err" : "warn")}</td>
     <td class=row>${mayWrite() ? `<button class="mini" data-act="fw-toggle" data-i="${i}">${r.enabled ? "disable" : "enable"}</button>
       <button class="mini danger" data-act="fw-del" data-id="${esc(r.id)}">✕</button>` : ""}</td></tr>`).join("") || "<tr><td colspan=7 class=muted>no rules — zone defaults only</td></tr>"}
@@ -233,7 +234,7 @@ async function viewPF(v) {
   const pfs = S.cfg.port_forwards || [];
   v.innerHTML = `<h1>Port Forwards</h1>
   <table><tr><th></th><th>Name</th><th>WAN</th><th>Proto</th><th>External</th><th>Internal</th><th></th></tr>
-  ${(pfs || []).map((p, i) => `<tr><td>${p.enabled ? pill("on", "ok") : pill("off")}</td><td><b>${esc(p.name || p.id)}</b></td>
+  ${arr(pfs).map((p, i) => `<tr><td>${p.enabled ? pill("on", "ok") : pill("off")}</td><td><b>${esc(p.name || p.id)}</b></td>
     <td class=mono>${esc(p.wan)}</td><td>${esc(p.protocol)}</td><td class=mono>${p.external_port}</td>
     <td class=mono>${esc(p.internal_ip)}:${p.internal_port}</td>
     <td class=row>${mayWrite() ? `<button class="mini" data-act="pf-toggle" data-i="${i}">${p.enabled ? "disable" : "enable"}</button>
@@ -242,7 +243,7 @@ async function viewPF(v) {
   ${mayWrite() ? `<h2>Add forward</h2>
   <form data-form=pf class=grid>
     <div><label>name</label><input name=name placeholder=nas-ssh></div>
-    <div><label>WAN interface</label><select name=wan>${(S.cfg.wans || []).map(w => `<option>${esc(w.interface)}</option>`).join("")}</select></div>
+    <div><label>WAN interface</label><select name=wan>${arr(S.cfg.wans).map(w => `<option>${esc(w.interface)}</option>`).join("")}</select></div>
     <div><label>protocol</label><select name=proto><option>tcp</option><option>udp</option></select></div>
     <div><label>external port</label><input name=ext type=number required min=1 max=65535></div>
     <div><label>internal IP</label><input name=ip required placeholder="192.168.1.50"></div>
@@ -253,7 +254,7 @@ async function viewPF(v) {
 async function viewVPN(v) {
   const tuns = await api("GET", "/wireguard/tunnels");
   v.innerHTML = `<h1>VPN — WireGuard</h1>
-  ${(tuns || []).map(t => `<div class=card><h3>${esc(t.name)} ${pill(esc(t.zone || "VPN"))}</h3>
+  ${arr(tuns).map(t => `<div class=card><h3>${esc(t.name)} ${pill(esc(t.zone || "VPN"))}</h3>
     <div class=kv><b>address</b><span class=mono>${esc(t.address)}</span>
     <b>listen</b><span>${t.listen_port || 51820}/udp</span>
     <b>peers</b><span>${(t.peers || []).length}${(t.peers || []).length ? ": " + t.peers.map(p => esc(p.name || String(p.public_key || "").slice(0, 10) + "…")).join(", ") : ""}</span></div>
@@ -297,7 +298,7 @@ async function viewSystem(v) {
     mayWrite() ? api("GET", "/auth/tokens") : Promise.resolve([]), api("GET", "/config")]);
   v.innerHTML = `<h1>System</h1>
   <div class=cards>
-    ${card("Services", (svcs || []).map(s => `<div class=row>${pill(s.status, pcls(s.status))} <b>${esc(s.name)}</b> <span class="muted small">${esc(s.detail || "")}</span></div>`).join("") || "<span class=muted>none</span>")}
+    ${card("Services", arr(svcs).map(s => `<div class=row>${pill(s.status, pcls(s.status))} <b>${esc(s.name)}</b> <span class="muted small">${esc(s.detail || "")}</span></div>`).join("") || "<span class=muted>none</span>")}
     ${card("DHCP server", kv(Object.entries(dhcp).map(([k, val]) => [k, esc(typeof val === "object" ? JSON.stringify(val) : String(val))])))}
     ${mayWrite() ? card("Change password", `<form data-form=pwd style=display:grid;gap:6px>
       <input name=old type=password placeholder="current password" autocomplete=current-password>
@@ -324,11 +325,11 @@ async function viewSystem(v) {
   </div>` : ""}
   <h2>Revisions</h2>
   <table><tr><th>Rev</th><th>Time</th><th>Author</th><th>Message</th><th></th></tr>
-  ${(revs || []).map(r => `<tr><td>${r.rev}</td><td class="muted small">${new Date(r.time).toLocaleString()}</td><td>${esc(r.author)}</td><td>${esc(r.message)}</td>
+  ${arr(revs).map(r => `<tr><td>${r.rev}</td><td class="muted small">${new Date(r.time).toLocaleString()}</td><td>${esc(r.author)}</td><td>${esc(r.message)}</td>
     <td>${mayWrite() ? `<button class="mini" data-act=rev-restore data-rev="${r.rev}">restore</button>` : ""}</td></tr>`).join("")}</table>
   ${mayWrite() ? `<h2>API tokens</h2>
   <table><tr><th>Name</th><th>Role</th><th>Created</th><th></th></tr>
-  ${(toks || []).map(tk => `<tr><td>${esc(tk.name)}</td><td>${pill(esc(tk.role))}</td><td class="muted small">${new Date(tk.created).toLocaleDateString()}</td>
+  ${arr(toks).map(tk => `<tr><td>${esc(tk.name)}</td><td>${pill(esc(tk.role))}</td><td class="muted small">${new Date(tk.created).toLocaleDateString()}</td>
     <td><button class="mini danger" data-act=tok-del data-id="${esc(tk.id)}">✕</button></td></tr>`).join("")}</table>
   <form data-form=token class=grid>
     <div><label>token name</label><input name=tokname required placeholder=home-automation></div>
@@ -342,11 +343,11 @@ async function viewLogs(v) {
   v.innerHTML = `<h1>Logs</h1>
   <h2>Audit (${(audit || []).length})</h2>
   <table><tr><th>Time</th><th>User</th><th>Action</th><th>Object</th><th>Result</th></tr>
-  ${(audit || []).map(a => `<tr><td class="muted small">${new Date(a.time).toLocaleString()}</td><td>${esc(a.user)}</td>
+  ${arr(audit).map(a => `<tr><td class="muted small">${new Date(a.time).toLocaleString()}</td><td>${esc(a.user)}</td>
     <td class=mono>${esc(a.action)}</td><td class=small>${esc(a.object || "")}</td>
     <td>${pill(esc(a.result), pcls(a.result))}</td></tr>`).join("")}</table>
   <h2>Events (${(evs || []).length})</h2>
-  <table>${[...(evs || [])].reverse().map(e => `<tr><td class="muted small" style=width:150px>${new Date(e.time).toLocaleString()}</td><td class=mono>${esc(e.kind)}</td><td class=muted>${esc(e.detail || "")}</td></tr>`).join("")}</table>`;
+  <table>${arr(evs).slice().reverse().reverse().map(e => `<tr><td class="muted small" style=width:150px>${new Date(e.time).toLocaleString()}</td><td class=mono>${esc(e.kind)}</td><td class=muted>${esc(e.detail || "")}</td></tr>`).join("")}</table>`;
 }
 
 /* ---------- actions ---------- */

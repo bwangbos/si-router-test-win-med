@@ -785,7 +785,7 @@ func (f *Fake) Leases() []state.Lease {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	now := time.Now()
-	var out []state.Lease
+	out := []state.Lease{}
 	for _, l := range f.leases {
 		if l.Expiry.After(now) {
 			out = append(out, l)

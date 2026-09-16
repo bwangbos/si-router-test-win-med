@@ -283,7 +283,7 @@ func (m *Manager) CreateToken(name, role string) (*APIToken, error) {
 func (m *Manager) Tokens() []APIToken {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var out []APIToken
+	out := []APIToken{}
 	for _, t := range m.tokens {
 		c := *t
 		c.Hash = ""

@@ -1371,7 +1371,7 @@ func (s *Server) hServices(w http.ResponseWriter, r *http.Request) {
 		Status  string `json:"status"`
 		Detail  string `json:"detail,omitempty"`
 	}
-	var out []svc
+	out := []svc{}
 	_, present := s.opt.Exec.File(dhcp.ConfPathFor())
 	name := dhcp.ServiceName
 	status := "unmanaged"

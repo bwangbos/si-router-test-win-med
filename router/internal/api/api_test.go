@@ -630,3 +630,14 @@ func TestWebUIServed(t *testing.T) {
 		t.Fatalf("GET /system unauth = %d, want 401", code)
 	}
 }
+
+func TestEmptyCollectionsAreArrays(t *testing.T) {
+	h := newHarness(t)
+	for _, p := range []string{"/api/v1/leases", "/api/v1/auth/tokens", "/api/v1/services",
+		"/api/v1/devices", "/api/v1/events", "/api/v1/audit", "/api/v1/config/revisions"} {
+		code, body := h.do("GET", p, nil, h.token)
+		if code != 200 || !strings.HasPrefix(strings.TrimSpace(string(body)), "[") {
+			t.Fatalf("%s: %d %s", p, code, body)
+		}
+	}
+}
