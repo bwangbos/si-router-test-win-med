@@ -56,6 +56,33 @@ API tokens), Logs (audit + events). The UI contains no secrets and holds no
 authority: every write goes through the same authenticated `/api/v1` API as
 the CLI, and a `readonly` session hides every mutation control.
 
+### Dashboard
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+### Internet (WAN status + inline editor)
+
+![Internet](docs/screenshots/internet.png)
+
+### Networks (bridges, VLANs, DHCP pools, zone policy)
+
+![Networks](docs/screenshots/networks.png)
+
+### Firewall (zone-to-zone rules)
+
+![Firewall](docs/screenshots/firewall.png)
+
+### VPN (WireGuard tunnels & peers)
+
+![VPN](docs/screenshots/vpn.png)
+
+### System (config editor, transactions, revisions, tokens)
+
+![System](docs/screenshots/system.png)
+
+*(Screenshots taken against the simulated `--backend fake` data plane with
+representative sample configuration.)*
+
 ## Key design properties
 
 - **Config is authoritative.** routerd treats its stored configuration as the
