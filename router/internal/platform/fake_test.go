@@ -280,3 +280,23 @@ func countEq(s []string, v string) int {
 	}
 	return n
 }
+
+func TestFakeTCClsactAndFilters(t *testing.T) {
+	f := NewFake([]string{"eth0"})
+	run(t, f, "", "tc", "qdisc", "replace", "dev", "eth0", "clsact")
+	run(t, f, "", "tc", "filter", "replace", "dev", "eth0", "ingress", "protocol", "all", "prio", "1",
+		"u32", "match", "u32", "0", "0", "action", "police", "rate", "940mbit", "burst", "10mbit", "drop")
+	q, err := state.ParseTC(run(t, f, "", "tc", "-s", "qdisc", "show", "dev", "eth0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, x := range q {
+		if x.Kind == "clsact" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("clsact qdisc missing: %+v", q)
+	}
+}

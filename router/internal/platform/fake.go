@@ -651,6 +651,9 @@ func (f *Fake) tc(args []string) ([]byte, error) {
 		if parent == "ingress" && kind == "" {
 			kind = "ingress"
 		}
+		if parent == "clsact" && kind == "" {
+			kind = "clsact"
+		}
 		if kind == "" {
 			return nil, fmt.Errorf("tc: missing qdisc kind")
 		}
