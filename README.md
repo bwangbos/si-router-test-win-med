@@ -1,5 +1,7 @@
 # si-router — Go-Based Consumer-Prosumer Router Platform
 
+MIT licensed — see [LICENSE](LICENSE).
+
 A self-hosted router control plane: a Go daemon (`routerd`) owns the desired
 network state and reconciles it against a real Linux data plane (iproute2,
 nftables, tc, dnsmasq, WireGuard). Everything is driven through one versioned
