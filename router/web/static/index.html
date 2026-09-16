@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>routerd</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+</head>
+<body>
+<div id="login" class="login hidden">
+  <form id="loginForm" class="login-card">
+    <div class="logo">📡 routerd</div>
+    <p class="muted">Router control plane</p>
+    <input id="luser" placeholder="username" value="admin" autocomplete="username">
+    <input id="lpass" type="password" placeholder="password" autocomplete="current-password">
+    <button type="submit">Sign in</button>
+    <div id="loginErr" class="err"></div>
+    <p class="muted small">Self-signed certificates: accept the browser warning once, then reload.</p>
+  </form>
+</div>
+
+<div id="app" class="hidden">
+  <aside id="sidebar">
+    <div class="logo">📡 routerd</div>
+    <nav id="nav"></nav>
+    <div class="sidebar-foot">
+      <select id="confirmSel" title="Apply changes in a confirmed-commit window (auto-rollback unless confirmed)">
+        <option value="0">apply: immediate</option>
+        <option value="60">apply: confirm in 60s</option>
+        <option value="120">apply: confirm in 120s</option>
+        <option value="300">apply: confirm in 5min</option>
+      </select>
+      <div id="whoami" class="muted small"></div>
+      <button id="logoutBtn" class="ghost">Sign out</button>
+    </div>
+  </aside>
+  <main>
+    <header id="topbar">
+      <div id="hostline">…</div>
+      <div id="healthpill" class="pill ok">…</div>
+    </header>
+    <div id="banner"></div>
+    <section id="view"></section>
+  </main>
+</div>
+<div id="toasts"></div>
+<script src="/app.js"></script>
+</body>
+</html>

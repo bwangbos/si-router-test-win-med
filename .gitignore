@@ -6,6 +6,8 @@ routerd-linux
 routerctl-linux
 
 # local scratch / runtime artifacts
+router/.tmp/
+login.json
 router/txn.json
 router/txn_cfg.json
 router/configs/seed.json

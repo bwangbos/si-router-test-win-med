@@ -36,6 +36,7 @@ import (
 	"router/internal/store"
 	"router/internal/wireguard"
 	"router/pkg/models"
+	"router/web"
 )
 
 // Version is the routerd version string.
@@ -189,6 +190,10 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("DELETE /api/v1/transactions/{id}", s.authOnly(auth.RoleAdmin, s.hTxnRollback))
 
 	m.HandleFunc("GET /metrics", s.authOnly(auth.RoleReadonly, s.hMetrics))
+
+	// management UI (embedded SPA); the /api/... patterns above are more
+	// specific and always win over this catch-all
+	m.Handle("GET /", web.Handler())
 	return s.recoverWare(m)
 }
 
@@ -1088,7 +1093,7 @@ func (s *Server) hEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	evs := s.st.Events(since)
 	if limit > 0 && len(evs) > limit {
-		evs = evs[:limit]
+		evs = evs[len(evs)-limit:] // keep the newest events
 	}
 	if evs == nil {
 		evs = []store.Event{}

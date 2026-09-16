@@ -615,3 +615,18 @@ func TestPlainApplyCancelsStalePending(t *testing.T) {
 		t.Fatalf("stale pending rolled back committed state: %s", body)
 	}
 }
+
+func TestWebUIServed(t *testing.T) {
+	h := newHarness(t)
+	code, body := h.do("GET", "/", nil, "")
+	if code != 200 || !strings.Contains(string(body), "routerd") {
+		t.Fatalf("GET / = %d, %d bytes", code, len(body))
+	}
+	if code, _ = h.do("GET", "/app.js", nil, ""); code != 200 {
+		t.Fatalf("GET /app.js = %d", code)
+	}
+	// API routes must not be shadowed by the SPA catch-all
+	if code, _ = h.do("GET", "/api/v1/system", nil, ""); code != 401 {
+		t.Fatalf("GET /system unauth = %d, want 401", code)
+	}
+}

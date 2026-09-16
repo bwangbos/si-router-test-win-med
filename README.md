@@ -20,6 +20,7 @@ a planned web UI.
 | `router/internal/api` | REST API: RBAC, sessions/API tokens, confirmed commits, transactions, audit, events, metrics |
 | `router/internal/store` | Revisioned config persistence + audit log + event bus |
 | `pkg/models` | Configuration model + validation |
+| `router/web` | Embedded single-page admin UI (dashboard, networks, devices, firewall, port-forwards, VPN, traffic, system, logs) |
 | `Go-Based Consumer-Prosumer Router Platform — System Design.md` | Original system design document |
 
 ## Quick start
@@ -64,4 +65,4 @@ go run ./cmd/routerctl networks add --name guest --subnet 10.10.0.1/24 \
 
 - ✅ Control plane + reconcilers + REST API + CLI (13 test packages green)
 - ✅ Verified against real Linux (bridges, routes, nft, dnsmasq DHCP/DNS, WireGuard links)
-- 🚧 Web UI (planned)
+- ✅ Web UI — dependency-free SPA served from the routerd binary (`/`, same REST API as the CLI)
