@@ -27,7 +27,22 @@ a **CLI** (`routerctl`), and any script speaking HTTP.
 | `router/pkg/models` | Configuration model + validation |
 | `Go-Based Consumer-Prosumer Router Platform — System Design.md` | Original system design document |
 
-## Quick start
+## Install (Linux router)
+
+```sh
+sudo bash install.sh                 # clone + build + systemd unit + CLI
+sudo bash install.sh --repo <url> --ref main --listen 0.0.0.0:8443
+sudo bash install.sh --uninstall --purge
+```
+
+Installs `routerd` (systemd service, state in `/var/lib/routerd`) and
+`routerctl` to `/usr/local/bin`; auto-installs `dnsmasq` on apt systems and
+disables the distro unit (routerd uses its own). No Go on the box? The
+script fetches the toolchain, or skip building entirely with `--from DIR`
+(prebuilt `routerd-linux` / `routerctl-linux`). The initial admin password
+is written to `/var/lib/routerd/initial-admin-password` (0600).
+
+## Quick start (development)
 
 ```sh
 cd router
